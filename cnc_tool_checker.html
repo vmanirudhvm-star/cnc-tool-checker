@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CNC Tool Checker</title>
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --text:#1f2933; --muted:#6b7785; --line:#dde2e8;
+          --blue:#1f6feb; --red:#d92d20; --redbg:#fee4e2; --green:#12a150; --greenbg:#d9f5e5;
+          --amber:#b54708; --amberbg:#fef0c7; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Segoe UI, Arial, sans-serif; background:var(--bg); color:var(--text); }
+  header { background:#1b2733; color:#fff; padding:18px 24px; }
+  header h1 { margin:0; font-size:22px; }
+  header p { margin:4px 0 0; color:#b8c4d0; font-size:14px; }
+  main { max-width:1000px; margin:20px auto; padding:0 16px 40px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px; margin-bottom:16px; }
+  .card h2 { margin:0 0 10px; font-size:17px; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:700px){ .grid{ grid-template-columns:1fr; } }
+  label.drop { display:block; border:2px dashed var(--line); border-radius:8px; padding:16px; cursor:pointer; text-align:center; color:var(--muted); }
+  label.drop:hover { border-color:var(--blue); }
+  input[type=file] { margin-top:8px; max-width:100%; }
+  textarea { width:100%; min-height:70px; padding:8px; border:1px solid var(--line); border-radius:6px; font-family:Consolas, monospace; font-size:14px; }
+  .hint { font-size:13px; color:var(--muted); margin:6px 0 0; }
+  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+  select { padding:7px; border:1px solid var(--line); border-radius:6px; }
+  button { background:var(--blue); color:#fff; border:0; padding:10px 18px; border-radius:6px; font-size:15px; cursor:pointer; }
+  button.secondary { background:#fff; color:var(--text); border:1px solid var(--line); }
+  button:hover { opacity:.9; }
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; }
+  @media (max-width:700px){ .stats{ grid-template-columns:1fr 1fr; } }
+  .stat { border-radius:8px; padding:12px; background:var(--bg); text-align:center; }
+  .stat b { display:block; font-size:28px; }
+  .stat span { font-size:13px; color:var(--muted); }
+  .stat.bad { background:var(--redbg); } .stat.bad b { color:var(--red); }
+  .stat.good { background:var(--greenbg); } .stat.good b { color:var(--green); }
+  table { width:100%; border-collapse:collapse; margin-top:8px; }
+  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); font-size:15px; }
+  th { background:var(--bg); }
+  .tag { padding:3px 10px; border-radius:99px; font-size:13px; font-weight:600; }
+  .tag.ok { background:var(--greenbg); color:var(--green); }
+  .tag.miss { background:var(--redbg); color:var(--red); }
+  .tag.extra { background:var(--amberbg); color:var(--amber); }
+  tr.miss td { background:#fff5f4; }
+  .banner { padding:12px 14px; border-radius:8px; font-weight:600; margin-bottom:10px; }
+  .banner.ok { background:var(--greenbg); color:var(--green); }
+  .banner.bad { background:var(--redbg); color:var(--red); }
+  .hidden { display:none; }
+  #status { color:var(--muted); font-size:14px; margin-top:8px; }
+  @media print { header, .card.inputs, .noprint { display:none; } body{ background:#fff; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>CNC Tool Checker</h1>
+  <p>Compare tools used in the CNC program with the tool table in the operation drawing</p>
+</header>
+
+<main>
+  <div class="card inputs">
+    <h2>Step 1 – Upload the two PDFs</h2>
+    <div class="grid">
+      <div>
+        <label class="drop">1) CNC Program PDF<br><small>(you can select more than one file)</small>
+          <input type="file" id="progFile" accept="application/pdf" multiple>
+        </label>
+      </div>
+      <div>
+        <label class="drop">2) Operation Drawing PDF<br><small>(the one with the tool table)</small>
+          <input type="file" id="drawFile" accept="application/pdf" multiple>
+        </label>
+      </div>
+    </div>
+    <div class="row">
+      <label>Program type:
+        <select id="mode">
+          <option value="mill">Milling / Machining centre (T1, T01, T12 M6)</option>
+          <option value="turn">Turning (T0101, T0202 – tool + offset)</option>
+        </select>
+      </label>
+    </div>
+    <p id="status"></p>
+  </div>
+
+  <div class="card inputs">
+    <h2>Step 2 – Check the detected tools (you can correct them)</h2>
+    <div class="grid">
+      <div>
+        <b>Tools found in CNC Program</b>
+        <textarea id="progTools" placeholder="Example: T1, T2, T5"></textarea>
+      </div>
+      <div>
+        <b>Tools found in Operation Drawing</b>
+        <textarea id="drawTools" placeholder="Example: T1, T2"></textarea>
+      </div>
+    </div>
+    <p class="hint">Tool numbers are separated by commas. If something is wrong or missing, just type it here – the check uses whatever is in these boxes.</p>
+    <div class="row">
+      <button id="compareBtn">Step 3 – Compare</button>
+      <button class="secondary" id="resetBtn">Clear all</button>
+    </div>
+  </div>
+
+  <div class="card hidden" id="result">
+    <h2>Result</h2>
+    <div id="banner" class="banner"></div>
+    <div class="stats">
+      <div class="stat"><b id="sProg">0</b><span>Tools in program</span></div>
+      <div class="stat"><b id="sDraw">0</b><span>Tools in drawing</span></div>
+      <div class="stat bad"><b id="sMiss">0</b><span>Missing in drawing</span></div>
+      <div class="stat good"><b id="sOk">0</b><span>Matched</span></div>
+    </div>
+    <table>
+      <thead><tr><th>Tool</th><th>In program</th><th>In drawing</th><th>Status</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="row noprint"><button class="secondary" onclick="window.print()">Print result</button></div>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+  const $ = id => document.getElementById(id);
+
+  // ---- Read all text from PDF files ----
+  async function readPdfText(file) {
+    const data = new Uint8Array(await file.arrayBuffer());
+    const pdf = await pdfjsLib.getDocument({ data }).promise;
+    let text = "";
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p);
+      const content = await page.getTextContent();
+      text += content.items.map(i => i.str + (i.hasEOL ? "\n" : " ")).join("") + "\n";
+    }
+    return text;
+  }
+
+  // ---- Find tool numbers in text ----
+  function findTools(text, isProgram) {
+    if (isProgram) {
+      text = text.replace(/\([^)]*\)/g, " ")   // remove (comments)
+                 .replace(/;.*$/gm, " ");      // remove ; comments
+    }
+    const turning = $("mode").value === "turn";
+    const found = new Set();
+    const re = /(?<![A-Za-z0-9])T[\s\-]*0*(\d{1,4})(?!\d)/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      let digits = m[1];
+      if (turning && digits.length >= 3) digits = digits.slice(0, -2); // T0101 -> 1
+      const n = parseInt(digits, 10);
+      if (n > 0) found.add(n);               // T0 = no tool
+    }
+    return [...found].sort((a, b) => a - b);
+  }
+
+  const fmt = n => "T" + String(n).padStart(2, "0");
+
+  async function handleFiles(inputId, boxId, isProgram, label) {
+    const files = $(inputId).files;
+    if (!files.length) return;
+    $("status").textContent = "Reading " + label + "...";
+    try {
+      let all = "";
+      for (const f of files) all += await readPdfText(f) + "\n";
+      const tools = findTools(all, isProgram);
+      $(boxId).value = tools.map(fmt).join(", ");
+      $("status").textContent = tools.length
+        ? label + ": found " + tools.length + " tools."
+        : label + ": no tools found. The PDF may be a scanned picture – type the tools manually in the box.";
+    } catch (e) {
+      $("status").textContent = "Could not read " + label + ". " + e.message;
+    }
+  }
+
+  $("progFile").addEventListener("change", () => handleFiles("progFile", "progTools", true, "CNC program"));
+  $("drawFile").addEventListener("change", () => handleFiles("drawFile", "drawTools", false, "Operation drawing"));
+  $("mode").addEventListener("change", () => {
+    handleFiles("progFile", "progTools", true, "CNC program");
+    handleFiles("drawFile", "drawTools", false, "Operation drawing");
+  });
+
+  // ---- Compare ----
+  function parseBox(id) {
+    const set = new Set();
+    ($(id).value.match(/\d+/g) || []).forEach(x => { const n = parseInt(x, 10); if (n > 0) set.add(n); });
+    return set;
+  }
+
+  $("compareBtn").addEventListener("click", () => {
+    const prog = parseBox("progTools");
+    const draw = parseBox("drawTools");
+    const all = [...new Set([...prog, ...draw])].sort((a, b) => a - b);
+
+    let miss = 0, ok = 0, extra = 0;
+    $("rows").innerHTML = all.map(n => {
+      const inP = prog.has(n), inD = draw.has(n);
+      let cls = "", tag = "";
+      if (inP && inD) { ok++; tag = '<span class="tag ok">OK</span>'; }
+      else if (inP && !inD) { miss++; cls = "miss"; tag = '<span class="tag miss">MISSING IN DRAWING</span>'; }
+      else { extra++; tag = '<span class="tag extra">In drawing, not used in program</span>'; }
+      return `<tr class="${cls}"><td><b>${fmt(n)}</b></td><td>${inP ? "Yes" : "–"}</td><td>${inD ? "Yes" : "–"}</td><td>${tag}</td></tr>`;
+    }).join("");
+
+    $("sProg").textContent = prog.size;
+    $("sDraw").textContent = draw.size;
+    $("sMiss").textContent = miss;
+    $("sOk").textContent = ok;
+
+    const banner = $("banner");
+    if (!prog.size) {
+      banner.className = "banner bad";
+      banner.textContent = "No program tools entered. Upload the CNC program PDF or type the tools.";
+    } else if (miss) {
+      const list = all.filter(n => prog.has(n) && !draw.has(n)).map(fmt).join(", ");
+      banner.className = "banner bad";
+      banner.textContent = "Attention: " + miss + " tool(s) missing in operation drawing → " + list;
+    } else {
+      banner.className = "banner ok";
+      banner.textContent = "All program tools are listed in the operation drawing.";
+    }
+    $("result").classList.remove("hidden");
+    $("result").scrollIntoView({ behavior: "smooth" });
+  });
+
+  $("resetBtn").addEventListener("click", () => {
+    ["progFile", "drawFile"].forEach(id => $(id).value = "");
+    $("progTools").value = ""; $("drawTools").value = "";
+    $("status").textContent = ""; $("result").classList.add("hidden");
+  });
+</script>
+</body>
+</html>
